@@ -1,163 +1,70 @@
-# Team Performance Dashboard (MySQL + Python/Streamlit)
-팀 단위 성과를 주차 기준으로 관리하고 시각화하는 간단한 성과관리 시스템입니다.  
-19명, 7개 파트를 기준으로 설계되었습니다.
+# 팀 성과관리 대시보드 v2 (MySQL + Python/Streamlit)
 
----
+이 프로젝트는 **파트 성과**와 **개인 성과**를 분리하여 관리하고, Streamlit 대시보드로 시각화합니다.  
+**관리자(Admin)만 데이터/마스터를 수정**할 수 있도록 (옵션 A: 관리자 비밀번호 로그인) 구현되어 있습니다.
 
-## 시스템 개요
-다음 성과 지표를 관리합니다.
+## 관리 지표(요구사항 반영)
 
-### 파트 단위 지표 (주간)
-- 파트 매출
-- 파트 영업이익
+### 파트 성과(주간, ISO week)
+- **매출**: 여러 건 입력 → 화면에서는 주차/파트별 **SUM**으로 집계  
+  - 입력 시 **프로젝트명 + 출처/근거 코멘트 필수**
+- **영업이익**: 여러 건 입력 → 화면에서는 주차/파트별 **SUM**으로 집계  
+  - 입력 시 **프로젝트명 + 출처/근거 코멘트 필수**
+- **GDC 사용량(MM)**: WBS 형태로 입력/표현  
+  - 화면에서 **WBS × 파트** 피벗 테이블(엑셀표 느낌)
 
-### 개인 단위 지표 (주간)
-- 주간보고 작성 여부
-- GDC 사용 여부 및 MM
-- AI 사용 여부
-
----
+### 개인 성과(주간, ISO week)
+- **AI 사용 여부**
+- **개인 준비미흡 횟수**
 
 ## 기술 스택
-- **DB**: MySQL
-- **백엔드/대시보드**: Python + Streamlit
-- **시각화**: Plotly
-- **DB 연결**: SQLAlchemy + PyMySQL
+- DB: MySQL
+- Dashboard: Streamlit
+- Visualization: Plotly
+- DB access: SQLAlchemy + PyMySQL
 
----
-
-## 프로젝트 구조
-```
-perf_dashboard/
-│
-├─ app.py                  # Streamlit 대시보드 메인
-├─ schema.sql              # DB 테이블 생성 스크립트
-├─ sample_data.sql         # 샘플 데이터(테스트용)
-├─ requirements.txt        # 파이썬 패키지 목록
-├─ README.md
-├─ .env.example            # DB 환경변수 예시
-│
-├─ templates/
-│   ├─ part_kpi_weekly.csv
-│   └─ member_kpi_weekly.csv
-│
-└─ scripts/
-    ├─ db.py
-    └─ import_csv.py       # CSV → DB 업로드 스크립트
-```
-
----
-
-## 빠른 실행 방법
+## 빠른 시작
 
 ### 1) DB 생성 및 테이블 생성
-MySQL에서 실행:
-
 ```bash
-mysql -u <user> -p < schema.sql
+mysql -u <user> -p -e "CREATE DATABASE IF NOT EXISTS perfdb DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;"
+mysql -u <user> -p perfdb < schema.sql
 ```
-
----
 
 ### 2) (선택) 샘플 데이터 적재
-테스트용 데이터 삽입:
-
 ```bash
-mysql -u <user> -p < sample_data.sql
+mysql -u <user> -p perfdb < sample_data.sql
 ```
-
----
 
 ### 3) 환경 변수 설정
-환경 변수 설정(권장):
+`.env.example`을 복사해 `.env`로 만들고 값 입력(권장)
 
-#### Linux / Mac
-```bash
-export DB_HOST=localhost
-export DB_PORT=3306
-export DB_NAME=perfdb
-export DB_USER=root
-export DB_PASSWORD=yourpassword
-```
-
-#### Windows (PowerShell)
-```powershell
-$env:DB_HOST="localhost"
-$env:DB_PORT="3306"
-$env:DB_NAME="perfdb"
-$env:DB_USER="root"
-$env:DB_PASSWORD="yourpassword"
-```
-
-또는 `.env.example`을 복사해서 `.env` 파일로 사용 가능
-
----
-
-### 4) 파이썬 환경 구성 및 실행
+### 4) 실행
 ```bash
 python -m venv .venv
-
-# Linux / Mac
-source .venv/bin/activate
-
-# Windows
-.venv\Scripts\activate
+# Windows: .venv\Scripts\activate
+# Mac/Linux: source .venv/bin/activate
 
 pip install -r requirements.txt
 streamlit run app.py
 ```
 
-브라우저에서 자동으로 대시보드가 열립니다.
+## 관리자 권한(옵션 A)
+- `.env`에 `ADMIN_PASSWORD`를 설정합니다.
+- 좌측 사이드바에서 관리자 비밀번호로 로그인하면 관리자 탭이 활성화됩니다.
 
----
-
-## CSV 업로드 기능 (선택)
-주간 성과를 CSV로 입력 후 DB에 반영할 수 있습니다.
-
-### 템플릿 파일
-- `templates/part_kpi_weekly.csv`
-- `templates/member_kpi_weekly.csv`
-
----
-
-### 업로드 실행
-```bash
-python scripts/import_csv.py   --year 2026   --week 7   --part templates/part_kpi_weekly.csv   --member templates/member_kpi_weekly.csv
+## 프로젝트 구조
 ```
-
----
-
-## 데이터 기준
-- 주차 기준: **ISO 주차 (year + week)**
-- 매출/영업이익 단위: **원 단위 정수**
-- GDC MM: 소수점 가능 (예: 12.50 MM)
-
----
-
-## 주요 화면 구성
-### 1) 파트 요약
-- 총 매출, 총 이익, 이익률
-- 주간보고 완료율
-- GDC 총 MM
-- AI 사용률
-- 파트별 매출/이익 그래프
-
-### 2) 개인 요약
-- 개인별 주간 KPI 테이블
-- 파트별 GDC MM 분포
-- 파트별 AI 사용률
-
-### 3) 추이/히트맵
-- 주차별 주간보고 완료율 히트맵
-- 주차별 AI 사용률 추이
-- 주차별 GDC 총 MM 추이
-
----
-
-## 참고 사항
-- 팀 내부 간이 성과관리용으로 설계된 MVP 버전입니다.
-- 추후 아래 기능 확장 가능:
-  - 로그인/권한 관리
-  - 팀원 직접 입력 화면
-  - 자동 데이터 연동(Git, Jira 등)
-  - 월간/분기 리포트 자동 생성
+perf_dashboard_v2/
+├─ app.py
+├─ schema.sql
+├─ sample_data.sql
+├─ requirements.txt
+├─ .env.example
+├─ CHANGELOG.md
+├─ templates/
+│  └─ gdc_wbs.csv
+└─ scripts/
+   ├─ __init__.py
+   └─ db.py
+```
