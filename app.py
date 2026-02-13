@@ -95,11 +95,16 @@ def query_finance_details(year:int, part_name:str, kpi_type:str):
 
 def query_gdc_monthly(year:int, part_names:list[str]):
     engine = get_engine()
+    # 모든 파트와 1-12월을 결합하여 누락된 월도 0으로 표시
     q = """
-    SELECT p.part_name, g.month, g.mm
-    FROM part_gdc_monthly g
-    JOIN part p ON p.part_id=g.part_id
-    WHERE g.year=:year AND p.part_name IN :parts
+    SELECT p.part_name, m.month, COALESCE(g.mm, 0) AS mm
+    FROM part p
+    CROSS JOIN (SELECT 1 AS month UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 
+                UNION SELECT 5 UNION SELECT 6 UNION SELECT 7 UNION SELECT 8 
+                UNION SELECT 9 UNION SELECT 10 UNION SELECT 11 UNION SELECT 12) m
+    LEFT JOIN part_gdc_monthly g ON g.part_id=p.part_id AND g.year=:year AND g.month=m.month
+    WHERE p.part_name IN :parts
+    ORDER BY p.part_name, m.month
     """
     return pd.read_sql(text(q), engine, params={"year":year, "parts":tuple(part_names)})
 
@@ -275,6 +280,67 @@ def admin_tab():
                 st.success("저장 완료")
                 st.rerun()
 
+    st.markdown("#### GDC 표 편집(파트 × 월)")
+    y_edit = st.number_input("연도(표 편집)", min_value=2000, max_value=2100, value=TARGET_YEAR, key="gdc_edit_y")
+    parts_active = load_parts().query("active==1")["part_name"].tolist()
+    
+    if parts_active:
+        # 모든 월(1-12)을 포함한 GDC 데이터 조회
+        q_edit = """
+        SELECT p.part_id, p.part_name, m.month, COALESCE(g.mm, 0) AS mm, COALESCE(g.comment, '') AS comment
+        FROM part p
+        CROSS JOIN (SELECT 1 AS month UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 
+                    UNION SELECT 5 UNION SELECT 6 UNION SELECT 7 UNION SELECT 8 
+                    UNION SELECT 9 UNION SELECT 10 UNION SELECT 11 UNION SELECT 12) m
+        LEFT JOIN part_gdc_monthly g ON g.part_id=p.part_id AND g.year=:year AND g.month=m.month
+        WHERE p.part_name IN :parts AND p.active=TRUE
+        ORDER BY p.part_name, m.month
+        """
+        gdc_edit = pd.read_sql(text(q_edit), engine, params={"year": int(y_edit), "parts": tuple(parts_active)})
+        
+        # 피벗 테이블 생성 (파트별 행, 월별 열)
+        gdc_pivot = gdc_edit.pivot_table(index="part_name", columns="month", values="mm", aggfunc="first", fill_value=0)
+        all_months = list(range(1, 13))
+        gdc_pivot = gdc_pivot.reindex(all_months, axis=1, fill_value=0)
+        gdc_pivot.columns = [f"M{int(c)}" for c in gdc_pivot.columns]
+        
+        # 편집 가능한 데이터 프레임
+        edited_gdc = st.data_editor(
+            gdc_pivot.reset_index(),
+            use_container_width=True,
+            hide_index=True,
+            key="gdc_editor"
+        )
+        
+        # 저장 버튼
+        if st.button("GDC 표 저장", key="save_gdc_table"):
+            with engine.begin() as con:
+                # 기존 데이터 삭제
+                con.execute(text("DELETE FROM part_gdc_monthly WHERE year=:y AND part_id IN (SELECT part_id FROM part WHERE part_name IN :parts)"),
+                           {"y": int(y_edit), "parts": tuple(parts_active)})
+                
+                # 새로운 데이터 삽입
+                for _, row in edited_gdc.iterrows():
+                    part_name = row['part_name']
+                    for month in range(1, 13):
+                        col_name = f"M{month}"
+                        mm_value = float(row[col_name]) if pd.notna(row[col_name]) else 0.0
+                        
+                        if mm_value > 0:  # 0이 아닌 값만 저장
+                            con.execute(text("""
+                            INSERT INTO part_gdc_monthly(year,month,part_id,mm,comment,updated_by)
+                            SELECT :y,:m,part_id,:mm,'관리자 표 수정','admin'
+                            FROM part WHERE part_name=:pn
+                            ON DUPLICATE KEY UPDATE
+                              mm=VALUES(mm),
+                              comment=VALUES(comment),
+                              updated_by=VALUES(updated_by)
+                            """), {"y": int(y_edit), "m": month, "pn": part_name, "mm": mm_value})
+            
+            st.cache_data.clear()
+            st.success("GDC 데이터가 저장되었습니다!")
+            st.rerun()
+
     st.markdown("#### 개인 성과 입력(월)")
     mem = load_members().query("active==1")
     if mem.empty:
@@ -353,7 +419,9 @@ def main():
             st.info("GDC 데이터가 없습니다.")
         else:
             piv = gdc.pivot_table(index="part_name", columns="month", values="mm", aggfunc="sum", fill_value=0)
-            piv = piv.reindex(sorted(piv.columns), axis=1)
+            # 1월부터 12월까지 모두 포함하도록 정렬
+            all_months = list(range(1, 13))
+            piv = piv.reindex(all_months, axis=1, fill_value=0)
             piv.columns = [f"{int(c)}월" for c in piv.columns]
             st.dataframe(piv.reset_index(), use_container_width=True, hide_index=True)
 
