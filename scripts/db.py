@@ -5,44 +5,87 @@ from sqlalchemy import create_engine
 # 로컬 개발에서는 .env 사용 가능
 load_dotenv()
 
-def _read_mysql_secrets():
+
+def _as_dict(obj):
+    """Streamlit Secrets의 중첩 객체가 dict가 아닐 때 최대한 dict로 변환."""
+    if obj is None:
+        return None
+    if isinstance(obj, dict):
+        return obj
+    try:
+        return dict(obj)
+    except Exception:
+        pass
+    try:
+        keys = getattr(obj, "keys", None)
+        get = getattr(obj, "get", None)
+        if callable(keys) and callable(get):
+            return {k: get(k) for k in keys()}
+    except Exception:
+        pass
+    return None
+
+
+def _read_mysql_cfg_from_secrets():
+    """가능한 모든 패턴으로 Streamlit Secrets에서 MySQL 설정을 찾는다."""
     import streamlit as st  # type: ignore
 
-    conn = st.secrets.get("connections", {})
+    top = _as_dict(st.secrets)
+    if top and "mysql" in top:
+        return _as_dict(top.get("mysql"))
 
-    # 1) [connections.mysql]
-    if isinstance(conn, dict) and "mysql" in conn:
-        return conn["mysql"]
+    conns = st.secrets.get("connections", None)
+    conns_d = _as_dict(conns)
 
-    # 2) [connections] 안에 바로 host/username/password가 들어있는 케이스
-    if isinstance(conn, dict) and all(k in conn for k in ("host", "username", "password")):
-        return conn
+    # 디버그(비밀번호 노출 없이)
+    try:
+        top_d = _as_dict(st.secrets)
+        st.write("DEBUG secrets top keys:", list(top_d.keys()) if top_d else "(no keys)")
+        if conns_d is None:
+            st.write("DEBUG connections type:", type(conns).__name__)
+        else:
+            st.write("DEBUG connections keys:", list(conns_d.keys()))
+    except Exception:
+        pass
 
-    # 3) [mysql]
-    if "mysql" in st.secrets:
-        return st.secrets["mysql"]
+    if conns_d:
+        if "mysql" in conns_d:
+            return _as_dict(conns_d.get("mysql"))
+        if all(k in conns_d for k in ("host", "username", "password")):
+            return conns_d
+
+    flat = _as_dict(st.secrets)
+    if flat and "connections.mysql" in flat:
+        return _as_dict(flat.get("connections.mysql"))
 
     return None
 
-def _build_ssl_args(ssl_ca: str | None):
-    """TiDB Cloud는 TLS 연결이 필수입니다."""
-    ca_path = None
-    if ssl_ca and str(ssl_ca).strip():
-        ca_path = str(ssl_ca).strip()
-    else:
-        try:
-            import certifi  # type: ignore
-            ca_path = certifi.where()
-        except Exception:
-            ca_path = None
 
-    if ca_path:
-        return {"ssl": {"ca": ca_path, "check_hostname": True}}
-    return {"ssl": {"check_hostname": True}}
+def _ca_path_from_cfg(cfg: dict) -> str | None:
+    """ssl_ca_pem(PEM 문자열) 또는 ssl_ca(경로) 또는 certifi 번들을 사용."""
+    import tempfile
+    from pathlib import Path
+
+    ssl_ca = cfg.get("ssl_ca")
+    if ssl_ca and str(ssl_ca).strip():
+        return str(ssl_ca).strip()
+
+    pem = cfg.get("ssl_ca_pem")
+    if pem and str(pem).strip():
+        tmp_dir = Path(tempfile.gettempdir())
+        ca_file = tmp_dir / "tidb_ca.pem"
+        ca_file.write_text(str(pem).strip(), encoding="utf-8")
+        return str(ca_file)
+
+    try:
+        import certifi  # type: ignore
+        return certifi.where()
+    except Exception:
+        return None
+
 
 def get_engine():
-    """엔진 생성."""
-    in_streamlit = False
+    """DB 엔진 생성: Streamlit Cloud에서는 Secrets 우선, 없으면 env(.env)로 fallback."""
     try:
         import streamlit as st  # type: ignore
         _ = st.secrets
@@ -52,42 +95,47 @@ def get_engine():
 
     if in_streamlit:
         import streamlit as st  # type: ignore
-        cfg = _read_mysql_secrets()
+
+        cfg = _read_mysql_cfg_from_secrets()
         if cfg is None:
             raise RuntimeError(
-                "Streamlit Secrets에서 MySQL 설정을 찾지 못했습니다. "
-                "Settings → Secrets에 [connections.mysql] 섹션을 추가하세요."
+                "Streamlit Secrets에서 MySQL 설정을 찾지 못했습니다.\n"
+                "- Secrets에 [connections.mysql] 섹션이 실제로 저장됐는지 확인하세요.\n"
+                "- 확인용: 앱 화면에 DEBUG connections keys가 출력됩니다.\n"
+                "예시:\n"
+                "[connections.mysql]\n"
+                "host=\"...\"\nport=4000\ndatabase=\"perfdb\"\nusername=\"...\"\npassword=\"...\"\n"
             )
 
         host = cfg.get("host")
-        port = str(cfg.get("port", 4000))
-        name = cfg.get("database", "perfdb")
-        user = cfg.get("username")
-        pwd  = cfg.get("password")
-        ssl_ca = cfg.get("ssl_ca", None)
+        port = int(cfg.get("port", 4000))
+        name = cfg.get("database", cfg.get("name", "perfdb"))
+        user = cfg.get("username", cfg.get("user"))
+        pwd = cfg.get("password", cfg.get("pwd"))
 
         if not host or not user or not pwd:
             raise RuntimeError("Secrets에 host/username/password 값이 비어있습니다.")
 
-        connect_args = _build_ssl_args(ssl_ca)
+        ca_path = _ca_path_from_cfg(cfg)
 
         st.write(f"DEBUG DB target: {host}:{port}/{name} (user={user})")
-        st.write("DEBUG TLS:", "on", "(using certifi CA bundle)")
+        st.write("DEBUG TLS CA:", ca_path if ca_path else "(none)")
 
-        url = f"mysql+pymysql://{user}:{pwd}@{host}:{port}/{name}?charset=utf8mb4"
+        url = f"mysql+mysqlconnector://{user}:{pwd}@{host}:{port}/{name}"
+        connect_args = {
+            "ssl_ca": ca_path,
+            "ssl_verify_cert": True,
+            "ssl_verify_identity": True,
+        } if ca_path else {}
+
         return create_engine(url, pool_pre_ping=True, connect_args=connect_args)
 
-    # 로컬 실행(.env)
+    # 로컬(.env)
     host = os.getenv("DB_HOST", "localhost")
     port = os.getenv("DB_PORT", "3306")
     name = os.getenv("DB_NAME", "perfdb")
     user = os.getenv("DB_USER", "root")
-    pwd  = os.getenv("DB_PASSWORD", "")
-    ssl_ca = os.getenv("DB_SSL_CA", None)
-
-    connect_args = {}
-    if ssl_ca:
-        connect_args = _build_ssl_args(ssl_ca)
+    pwd = os.getenv("DB_PASSWORD", "")
 
     url = f"mysql+pymysql://{user}:{pwd}@{host}:{port}/{name}?charset=utf8mb4"
-    return create_engine(url, pool_pre_ping=True, connect_args=connect_args)
+    return create_engine(url, pool_pre_ping=True)
