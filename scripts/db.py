@@ -37,17 +37,6 @@ def _read_mysql_cfg_from_secrets():
     conns = st.secrets.get("connections", None)
     conns_d = _as_dict(conns)
 
-    # 디버그(비밀번호 노출 없이)
-    try:
-        top_d = _as_dict(st.secrets)
-        st.write("DEBUG secrets top keys:", list(top_d.keys()) if top_d else "(no keys)")
-        if conns_d is None:
-            st.write("DEBUG connections type:", type(conns).__name__)
-        else:
-            st.write("DEBUG connections keys:", list(conns_d.keys()))
-    except Exception:
-        pass
-
     if conns_d:
         if "mysql" in conns_d:
             return _as_dict(conns_d.get("mysql"))

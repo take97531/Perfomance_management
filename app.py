@@ -1,36 +1,20 @@
 import os
-
 import pandas as pd
 import streamlit as st
 import plotly.express as px
 from sqlalchemy import text
 from dotenv import load_dotenv
-
 from scripts.db import get_engine
+import streamlit as st
 
-# Secrets 미로딩 상태면 DB 쿼리에서 계속 죽기 때문에, 안내 후 중단
-if "connections" not in st.secrets or "mysql" not in st.secrets.get("connections", {}):
-    st.error(
-        "Streamlit Secrets가 로드되지 않았습니다.\n"
-        "Settings → Secrets에 아래 형태로 저장 후, Reboot app 해주세요.\n\n"
-        "[connections.mysql]\n"
-        "host=\"...\"\nport=4000\ndatabase=\"perfdb\"\nusername=\"...\"\npassword=\"...\"\n"
-        "ssl_ca_pem=\"\"\"\n-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n\"\"\"\n"
-    )
-    st.stop()
-
-# 로컬 개발에서는 .env 사용 가능
 load_dotenv()
-
 st.set_page_config(page_title="팀 성과관리 대시보드", layout="wide")
 
 TARGET_YEAR = int(os.getenv("TARGET_YEAR", "2026"))
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 
-
 def is_admin() -> bool:
     return bool(st.session_state.get("is_admin", False))
-
 
 def admin_login_ui():
     st.sidebar.markdown("### 관리자 로그인")
@@ -50,12 +34,10 @@ def admin_login_ui():
         else:
             st.sidebar.error("비밀번호가 올바르지 않습니다.")
 
-
 @st.cache_data(ttl=60)
 def load_parts():
     engine = get_engine()
     return pd.read_sql(text("SELECT part_id, part_name, active FROM part ORDER BY part_id"), engine)
-
 
 @st.cache_data(ttl=60)
 def load_members():
@@ -67,15 +49,13 @@ def load_members():
     """
     return pd.read_sql(text(q), engine)
 
-
 def part_filter_ui():
     parts = load_parts()
     active = parts.query("active==1")["part_name"].tolist()
     st.sidebar.markdown("### 파트 필터")
     return st.sidebar.multiselect("파트", active, default=active)
 
-
-def query_finance_monthly(year: int, part_names: list[str]):
+def query_finance_monthly(year:int, part_names:list[str]):
     engine = get_engine()
     q = """
     SELECT p.part_name, f.month,
@@ -87,10 +67,9 @@ def query_finance_monthly(year: int, part_names: list[str]):
     GROUP BY p.part_name, f.month
     ORDER BY p.part_name, f.month
     """
-    return pd.read_sql(text(q), engine, params={"year": year, "parts": tuple(part_names)})
+    return pd.read_sql(text(q), engine, params={"year":year, "parts":tuple(part_names)})
 
-
-def query_finance_total(year: int, part_names: list[str]):
+def query_finance_total(year:int, part_names:list[str]):
     engine = get_engine()
     q = """
     SELECT p.part_name,
@@ -102,10 +81,9 @@ def query_finance_total(year: int, part_names: list[str]):
     GROUP BY p.part_name
     ORDER BY p.part_name
     """
-    return pd.read_sql(text(q), engine, params={"year": year, "parts": tuple(part_names)})
+    return pd.read_sql(text(q), engine, params={"year":year, "parts":tuple(part_names)})
 
-
-def query_finance_details(year: int, part_name: str, kpi_type: str):
+def query_finance_details(year:int, part_name:str, kpi_type:str):
     engine = get_engine()
     q = """
     SELECT f.created_at, f.month, f.amount, f.project_name, f.source_comment, f.created_by
@@ -114,25 +92,19 @@ def query_finance_details(year: int, part_name: str, kpi_type: str):
     WHERE f.year=:year AND p.part_name=:part_name AND f.kpi_type=:kpi_type
     ORDER BY f.created_at DESC
     """
-    return pd.read_sql(text(q), engine, params={"year": year, "part_name": part_name, "kpi_type": kpi_type})
+    return pd.read_sql(text(q), engine, params={"year":year, "part_name":part_name, "kpi_type":kpi_type})
 
-
-def query_gdc_monthly(year: int, part_names: list[str]):
+def query_gdc_monthly(year:int, part_names:list[str]):
     engine = get_engine()
     q = """
-    SELECT p.part_name, m.month, COALESCE(g.mm, 0) AS mm
-    FROM part p
-    CROSS JOIN (SELECT 1 AS month UNION SELECT 2 UNION SELECT 3 UNION SELECT 4
-                UNION SELECT 5 UNION SELECT 6 UNION SELECT 7 UNION SELECT 8
-                UNION SELECT 9 UNION SELECT 10 UNION SELECT 11 UNION SELECT 12) m
-    LEFT JOIN part_gdc_monthly g ON g.part_id=p.part_id AND g.year=:year AND g.month=m.month
-    WHERE p.part_name IN :parts
-    ORDER BY p.part_name, m.month
+    SELECT p.part_name, g.month, g.mm
+    FROM part_gdc_monthly g
+    JOIN part p ON p.part_id=g.part_id
+    WHERE g.year=:year AND p.part_name IN :parts
     """
-    return pd.read_sql(text(q), engine, params={"year": year, "parts": tuple(part_names)})
+    return pd.read_sql(text(q), engine, params={"year":year, "parts":tuple(part_names)})
 
-
-def query_member_monthly(year: int, part_names: list[str]):
+def query_member_monthly(year:int, part_names:list[str]):
     engine = get_engine()
     q = """
     SELECT p.part_name, m.name, w.month, w.ai_used, w.prep_lack_count
@@ -142,25 +114,23 @@ def query_member_monthly(year: int, part_names: list[str]):
     WHERE w.year=:year AND p.part_name IN :parts AND m.active=TRUE
     ORDER BY p.part_name, m.name, w.month
     """
-    return pd.read_sql(text(q), engine, params={"year": year, "parts": tuple(part_names)})
-
+    return pd.read_sql(text(q), engine, params={"year":year, "parts":tuple(part_names)})
 
 def kpi_cards(fin_total, gdc_df, mem_df):
     total_rev = int(fin_total["revenue_sum"].sum()) if not fin_total.empty else 0
     total_op = int(fin_total["op_profit_sum"].sum()) if not fin_total.empty else 0
-    margin = (total_op / total_rev) if total_rev else 0
+    margin = (total_op/total_rev) if total_rev else 0
     total_mm = float(gdc_df["mm"].sum()) if not gdc_df.empty else 0.0
     ai_rate = float(mem_df["ai_used"].mean()) if not mem_df.empty else 0.0
     prep_sum = int(mem_df["prep_lack_count"].sum()) if not mem_df.empty else 0
 
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1,c2,c3,c4,c5,c6 = st.columns(6)
     c1.metric("총 매출(누적, KRW)", f"{total_rev:,}")
     c2.metric("총 영업이익(누적, KRW)", f"{total_op:,}")
-    c3.metric("이익률", f"{margin * 100:.1f}%")
+    c3.metric("이익률", f"{margin*100:.1f}%")
     c4.metric("GDC 총 MM(연누적)", f"{total_mm:.2f}")
-    c5.metric("AI 사용률(개인)", f"{ai_rate * 100:.1f}%")
+    c5.metric("AI 사용률(개인)", f"{ai_rate*100:.1f}%")
     c6.metric("준비미흡 합계", f"{prep_sum:,}")
-
 
 def admin_tab():
     st.subheader("관리자 기능")
@@ -168,7 +138,7 @@ def admin_tab():
 
     st.markdown("#### 파트 관리")
     parts = load_parts()
-    c1, c2 = st.columns([1, 1])
+    c1,c2 = st.columns([1,1])
     with c1:
         with st.form("add_part"):
             n = st.text_input("파트명(신규)")
@@ -183,27 +153,27 @@ def admin_tab():
                     st.success("추가 완료")
                     st.rerun()
     with c2:
-        st.dataframe(parts.rename(columns={"part_id": "파트ID", "part_name": "파트명", "active": "활성"}), use_container_width=True, hide_index=True)
+        st.dataframe(parts, use_container_width=True, hide_index=True)
 
     st.markdown("파트 수정/비활성화")
     with st.form("update_part"):
         sel = st.selectbox("대상 파트", parts["part_name"].tolist() if not parts.empty else [])
         new_name = st.text_input("새 파트명(변경 시)")
-        active_flag = st.selectbox("활성 여부", ["TRUE", "FALSE"])
+        active_flag = st.selectbox("활성 여부", ["TRUE","FALSE"])
         ok = st.form_submit_button("적용")
         if ok and sel:
             with engine.begin() as con:
                 if new_name.strip():
                     con.execute(text("UPDATE part SET part_name=:nn WHERE part_name=:pn"), {"nn": new_name.strip(), "pn": sel})
                     sel = new_name.strip()
-                con.execute(text("UPDATE part SET active=:a WHERE part_name=:pn"), {"a": 1 if active_flag == "TRUE" else 0, "pn": sel})
+                con.execute(text("UPDATE part SET active=:a WHERE part_name=:pn"), {"a": 1 if active_flag=="TRUE" else 0, "pn": sel})
             st.cache_data.clear()
             st.success("적용 완료")
             st.rerun()
 
     st.markdown("#### 인원 관리")
     members = load_members()
-    cA, cB = st.columns([1, 1])
+    cA,cB = st.columns([1,1])
     with cA:
         with st.form("add_member"):
             n = st.text_input("이름(신규)")
@@ -223,7 +193,7 @@ def admin_tab():
                     st.success("추가 완료")
                     st.rerun()
     with cB:
-        st.dataframe(members.rename(columns={"member_id": "멤버ID", "name": "이름", "active": "활성", "part_id": "파트ID", "part_name": "파트명"}), use_container_width=True, hide_index=True)
+        st.dataframe(members, use_container_width=True, hide_index=True)
 
     st.markdown("인원 수정/비활성화")
     with st.form("update_member"):
@@ -234,7 +204,7 @@ def admin_tab():
             new_name = st.text_input("새 이름(변경 시)")
             parts_active = load_parts().query("active==1")["part_name"].tolist()
             new_part = st.selectbox("새 파트", parts_active)
-            active_flag = st.selectbox("활성 여부(인원)", ["TRUE", "FALSE"])
+            active_flag = st.selectbox("활성 여부(인원)", ["TRUE","FALSE"])
             ok = st.form_submit_button("적용")
             if ok:
                 with engine.begin() as con:
@@ -246,7 +216,7 @@ def admin_tab():
                     SET part_id = (SELECT part_id FROM part WHERE part_name=:pn),
                         active = :a
                     WHERE name=:n
-                    """), {"pn": new_part, "a": 1 if active_flag == "TRUE" else 0, "n": sel})
+                    """), {"pn": new_part, "a": 1 if active_flag=="TRUE" else 0, "n": sel})
                 st.cache_data.clear()
                 st.success("적용 완료")
                 st.rerun()
@@ -267,23 +237,80 @@ def admin_tab():
             if not proj.strip() or not src.strip():
                 st.error("프로젝트명과 출처/근거 코멘트는 필수입니다.")
             else:
-                kpi_type = "REVENUE" if kpi == "매출" else "OP_PROFIT"
+                kpi_type = "REVENUE" if kpi=="매출" else "OP_PROFIT"
                 with engine.begin() as con:
                     con.execute(text("""
                     INSERT INTO part_finance_entry(year,month,part_id,kpi_type,amount,project_name,source_comment,created_by)
                     SELECT :y,:m,part_id,:k,:amt,:proj,:src,'admin'
                     FROM part WHERE part_name=:pn
-                    """), {"y": int(y), "m": int(m), "pn": p, "k": kpi_type, "amt": int(amt), "proj": proj.strip(), "src": src.strip()})
+                    """), {"y":int(y),"m":int(m),"pn":p,"k":kpi_type,"amt":int(amt),
+                           "proj":proj.strip(),"src":src.strip()})
                 st.cache_data.clear()
                 st.success("추가 완료")
                 st.rerun()
 
+    st.markdown("#### GDC 입력(파트×월)")
+    with st.form("gdc_monthly"):
+        y = st.number_input("연도(GDC)", min_value=2000, max_value=2100, value=TARGET_YEAR, key="gdc_y")
+        m = st.number_input("월(GDC, 1~12)", min_value=1, max_value=12, value=1, key="gdc_m")
+        parts_active = load_parts().query("active==1")["part_name"].tolist()
+        p = st.selectbox("파트(GDC)", parts_active, key="gdc_p")
+        mm = st.number_input("MM", min_value=0.0, value=0.0, step=0.5, key="gdc_mm")
+        cmt = st.text_input("코멘트(필수)", key="gdc_cmt")
+        ok = st.form_submit_button("저장/갱신")
+        if ok:
+            if not cmt.strip():
+                st.error("코멘트는 필수입니다.")
+            else:
+                with engine.begin() as con:
+                    con.execute(text("""
+                    INSERT INTO part_gdc_monthly(year,month,part_id,mm,comment,updated_by)
+                    SELECT :y,:m,part_id,:mm,:cmt,'admin'
+                    FROM part WHERE part_name=:pn
+                    ON DUPLICATE KEY UPDATE
+                      mm=VALUES(mm),
+                      comment=VALUES(comment),
+                      updated_by=VALUES(updated_by)
+                    """), {"y":int(y),"m":int(m),"pn":p,"mm":float(mm),"cmt":cmt.strip()})
+                st.cache_data.clear()
+                st.success("저장 완료")
+                st.rerun()
+
+    st.markdown("#### 개인 성과 입력(월)")
+    mem = load_members().query("active==1")
+    if mem.empty:
+        st.info("활성 멤버가 없습니다.")
+    else:
+        with st.form("member_monthly"):
+            y = st.number_input("연도(개인)", min_value=2000, max_value=2100, value=TARGET_YEAR, key="mp_y")
+            m = st.number_input("월(개인)", min_value=1, max_value=12, value=1, key="mp_m")
+            person = st.selectbox("대상 인원", mem["name"].tolist(), key="mp_name")
+            ai = st.checkbox("AI 사용", value=False, key="mp_ai")
+            prep = st.number_input("준비미흡 횟수", min_value=0, value=0, step=1, key="mp_prep")
+            cmt = st.text_input("코멘트(선택)", key="mp_cmt")
+            ok = st.form_submit_button("저장/갱신")
+            if ok:
+                with engine.begin() as con:
+                    con.execute(text("""
+                    INSERT INTO member_monthly_perf(year,month,member_id,ai_used,prep_lack_count,comment,updated_by)
+                    SELECT :y,:m,member_id,:ai,:prep,:cmt,'admin'
+                    FROM member WHERE name=:n
+                    ON DUPLICATE KEY UPDATE
+                      ai_used=VALUES(ai_used),
+                      prep_lack_count=VALUES(prep_lack_count),
+                      comment=VALUES(comment),
+                      updated_by=VALUES(updated_by)
+                    """), {"y":int(y),"m":int(m),"n":person,"ai":1 if ai else 0,
+                           "prep":int(prep),"cmt":cmt.strip() if cmt.strip() else None})
+                st.cache_data.clear()
+                st.success("저장 완료")
+                st.rerun()
 
 def main():
     admin_login_ui()
     parts_selected = part_filter_ui()
 
-    st.title("팀 성과관리 대시보드 v3")
+    st.title("팀 성과관리 대시보드")
     st.caption(f"{TARGET_YEAR}년 누적 기준 (주차 필터 없음)")
 
     if not parts_selected:
@@ -301,17 +328,24 @@ def main():
 
     with tab1:
         st.subheader("파트 성과")
-        c1, c2 = st.columns(2)
-        fin_total_disp = fin_total.rename(columns={"part_name": "파트", "revenue_sum": "매출", "op_profit_sum": "영업이익"})
+
+        c1,c2 = st.columns(2)
         with c1:
-            st.plotly_chart(px.bar(fin_total_disp, x="파트", y="매출", title="파트별 매출(누적)"), use_container_width=True)
+            st.plotly_chart(px.bar(fin_total, x="part_name", y="revenue_sum", title="파트별 매출(누적)"), use_container_width=True)
         with c2:
-            st.plotly_chart(px.bar(fin_total_disp, x="파트", y="영업이익", title="파트별 영업이익(누적)"), use_container_width=True)
+            st.plotly_chart(px.bar(fin_total, x="part_name", y="op_profit_sum", title="파트별 영업이익(누적)"), use_container_width=True)
+
+        if not fin_total.empty:
+            tmp = fin_total.copy()
+            tmp["이익률"] = tmp.apply(lambda r: (r["op_profit_sum"]/r["revenue_sum"]) if r["revenue_sum"] else 0, axis=1)
+            fig = px.scatter(tmp, x="revenue_sum", y="op_profit_sum", text="part_name", title="매출 vs 영업이익(누적)", hover_data=["이익률"])
+            fig.update_traces(textposition="top center")
+            st.plotly_chart(fig, use_container_width=True)
 
         st.markdown("#### 월별 추이(선택 파트 합산)")
         if not fin_monthly.empty:
-            agg = fin_monthly.groupby("month").agg(매출=("revenue_sum", "sum"), 영업이익=("op_profit_sum", "sum")).reset_index()
-            st.plotly_chart(px.line(agg, x="month", y=["매출", "영업이익"], title="월별 매출/영업이익 추이"), use_container_width=True)
+            agg = fin_monthly.groupby("month").agg(매출=("revenue_sum","sum"), 영업이익=("op_profit_sum","sum")).reset_index()
+            st.plotly_chart(px.line(agg, x="month", y=["매출","영업이익"], title="월별 매출/영업이익 추이"), use_container_width=True)
         else:
             st.info("매출/영업이익 데이터가 없습니다.")
 
@@ -320,11 +354,30 @@ def main():
             st.info("GDC 데이터가 없습니다.")
         else:
             piv = gdc.pivot_table(index="part_name", columns="month", values="mm", aggfunc="sum", fill_value=0)
-            all_months = list(range(1, 13))
-            piv = piv.reindex(all_months, axis=1, fill_value=0)
+            piv = piv.reindex(sorted(piv.columns), axis=1)
             piv.columns = [f"{int(c)}월" for c in piv.columns]
-            df_piv = piv.reset_index().rename(columns={"part_name": "파트"})
-            st.dataframe(df_piv, use_container_width=True, hide_index=True)
+            st.dataframe(piv.reset_index(), use_container_width=True, hide_index=True)
+
+            pt = gdc.groupby("part_name")["mm"].sum().reset_index(name="mm_sum")
+            total = float(pt["mm_sum"].sum()) if not pt.empty else 0.0
+            pt["mm_share"] = pt["mm_sum"].apply(lambda x: (x/total) if total else 0.0)
+            c1,c2 = st.columns(2)
+            with c1:
+                st.plotly_chart(px.bar(pt, x="part_name", y="mm_sum", title="파트별 GDC 총 MM(연누적)"), use_container_width=True)
+            with c2:
+                fig = px.bar(pt, x="part_name", y="mm_share", title="파트별 GDC 사용률(전체 대비 %)")
+                fig.update_yaxes(tickformat=".0%")
+                st.plotly_chart(fig, use_container_width=True)
+
+        st.markdown("#### (드릴다운) 매출/영업이익 상세 내역")
+        if not fin_total.empty:
+            psel = st.selectbox("파트 선택(상세)", fin_total["part_name"].tolist())
+            ksel = st.radio("구분", ["매출", "영업이익"], horizontal=True)
+            ktype = "REVENUE" if ksel=="매출" else "OP_PROFIT"
+            detail = query_finance_details(TARGET_YEAR, psel, ktype)
+            if not detail.empty:
+                detail = detail.rename(columns={"month":"월","amount":"금액","project_name":"프로젝트명","source_comment":"근거","created_by":"입력자"})
+            st.dataframe(detail, use_container_width=True, hide_index=True)
 
     with tab2:
         st.subheader("개인 성과")
@@ -335,23 +388,33 @@ def main():
 
             with ai_tab:
                 st.markdown("#### AI 사용 현황(월 단위)")
-                ai_df = mem[["part_name", "name", "month", "ai_used"]].copy()
-                ai_df["ai_used"] = ai_df["ai_used"].map({0: "N", 1: "Y", False: "N", True: "Y"})
-                ai_df = ai_df.rename(columns={"part_name": "파트", "name": "이름", "month": "월", "ai_used": "AI 사용"})
+                ai_df = mem[["part_name","name","month","ai_used"]].copy()
+                ai_df["ai_used"] = ai_df["ai_used"].map({0:"N",1:"Y",False:"N",True:"Y"})
+                ai_df = ai_df.rename(columns={"part_name":"파트","name":"이름","month":"월","ai_used":"AI 사용"})
                 st.dataframe(ai_df, use_container_width=True, hide_index=True)
+
+                ai_rate = mem.groupby("part_name")["ai_used"].mean().reset_index(name="ai_rate")
+                fig = px.bar(ai_rate, x="part_name", y="ai_rate", title="파트별 AI 사용률(연누적)")
+                fig.update_yaxes(tickformat=".0%")
+                st.plotly_chart(fig, use_container_width=True)
 
             with prep_tab:
                 st.markdown("#### 준비미흡 현황(월 단위)")
-                prep_df = mem[["part_name", "name", "month", "prep_lack_count"]].copy()
-                prep_df = prep_df.rename(columns={"part_name": "파트", "name": "이름", "month": "월", "prep_lack_count": "준비미흡"})
+                prep_df = mem[["part_name","name","month","prep_lack_count"]].copy()
+                prep_df = prep_df.rename(columns={"part_name":"파트","name":"이름","month":"월","prep_lack_count":"준비미흡"})
                 st.dataframe(prep_df, use_container_width=True, hide_index=True)
+
+                prep_part = mem.groupby("part_name")["prep_lack_count"].sum().reset_index(name="prep_sum")
+                st.plotly_chart(px.bar(prep_part, x="part_name", y="prep_sum", title="파트별 준비미흡 총합(연누적)"), use_container_width=True)
+
+                topn = mem.groupby("name")["prep_lack_count"].sum().reset_index(name="prep_sum").sort_values("prep_sum", ascending=False).head(10)
+                st.plotly_chart(px.bar(topn, x="name", y="prep_sum", title="준비미흡 TOP 10(연누적)"), use_container_width=True)
 
     with tab3:
         if not is_admin():
             st.info("관리자 로그인 후 사용 가능합니다.")
         else:
             admin_tab()
-
 
 if __name__ == "__main__":
     main()
