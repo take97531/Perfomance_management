@@ -58,9 +58,6 @@ def get_engine():
         if ssl_ca:
             connect_args["ssl"] = {"ca": ssl_ca}
 
-        # 디버그: 실제 타겟을 확인 (비밀번호는 출력하지 않음)
-        st.write(f"DEBUG DB target: {host}:{port}/{name} (user={user})")
-
         url = f"mysql+pymysql://{user}:{pwd}@{host}:{port}/{name}?charset=utf8mb4"
         return create_engine(url, pool_pre_ping=True, connect_args=connect_args)
 
