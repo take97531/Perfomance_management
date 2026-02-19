@@ -330,22 +330,25 @@ def main():
         st.subheader("파트 성과")
 
         c1,c2 = st.columns(2)
+        fin_total_disp = fin_total.rename(columns={"part_name":"파트","revenue_sum":"매출","op_profit_sum":"영업이익"})
         with c1:
-            st.plotly_chart(px.bar(fin_total, x="part_name", y="revenue_sum", title="파트별 매출(누적)"), use_container_width=True)
+            st.plotly_chart(px.bar(fin_total_disp, x="파트", y="매출", title="파트별 매출(누적)"), use_container_width=True)
         with c2:
-            st.plotly_chart(px.bar(fin_total, x="part_name", y="op_profit_sum", title="파트별 영업이익(누적)"), use_container_width=True)
+            st.plotly_chart(px.bar(fin_total_disp, x="파트", y="영업이익", title="파트별 영업이익(누적)"), use_container_width=True)
 
         if not fin_total.empty:
             tmp = fin_total.copy()
             tmp["이익률"] = tmp.apply(lambda r: (r["op_profit_sum"]/r["revenue_sum"]) if r["revenue_sum"] else 0, axis=1)
-            fig = px.scatter(tmp, x="revenue_sum", y="op_profit_sum", text="part_name", title="매출 vs 영업이익(누적)", hover_data=["이익률"])
+            tmp_disp = tmp.rename(columns={"part_name":"파트","revenue_sum":"매출","op_profit_sum":"영업이익"})
+            fig = px.scatter(tmp_disp, x="매출", y="영업이익", text="파트", title="매출 vs 영업이익(누적)", hover_data=["이익률"])
             fig.update_traces(textposition="top center")
             st.plotly_chart(fig, use_container_width=True)
 
         st.markdown("#### 월별 추이(선택 파트 합산)")
         if not fin_monthly.empty:
             agg = fin_monthly.groupby("month").agg(매출=("revenue_sum","sum"), 영업이익=("op_profit_sum","sum")).reset_index()
-            st.plotly_chart(px.line(agg, x="month", y=["매출","영업이익"], title="월별 매출/영업이익 추이"), use_container_width=True)
+            agg_disp = agg.rename(columns={"month":"월"})
+            st.plotly_chart(px.line(agg_disp, x="월", y=["매출","영업이익"], title="월별 매출/영업이익 추이"), use_container_width=True)
         else:
             st.info("매출/영업이익 데이터가 없습니다.")
 
@@ -354,18 +357,23 @@ def main():
             st.info("GDC 데이터가 없습니다.")
         else:
             piv = gdc.pivot_table(index="part_name", columns="month", values="mm", aggfunc="sum", fill_value=0)
-            piv = piv.reindex(sorted(piv.columns), axis=1)
+            all_months = list(range(1, 13))
+            piv = piv.reindex(all_months, axis=1, fill_value=0)
             piv.columns = [f"{int(c)}월" for c in piv.columns]
-            st.dataframe(piv.reset_index(), use_container_width=True, hide_index=True)
+            df_piv = piv.reset_index().rename(columns={"part_name":"파트"})
+            st.dataframe(df_piv, use_container_width=True, hide_index=True)
 
             pt = gdc.groupby("part_name")["mm"].sum().reset_index(name="mm_sum")
             total = float(pt["mm_sum"].sum()) if not pt.empty else 0.0
             pt["mm_share"] = pt["mm_sum"].apply(lambda x: (x/total) if total else 0.0)
             c1,c2 = st.columns(2)
+            pt_disp = pt.rename(columns={"part_name":"파트","mm_sum":"MM합계"})
             with c1:
-                st.plotly_chart(px.bar(pt, x="part_name", y="mm_sum", title="파트별 GDC 총 MM(연누적)"), use_container_width=True)
+                st.plotly_chart(px.bar(pt_disp, x="파트", y="MM합계", title="파트별 GDC 총 MM(연누적)"), use_container_width=True)
             with c2:
-                fig = px.bar(pt, x="part_name", y="mm_share", title="파트별 GDC 사용률(전체 대비 %)")
+                pt_share = pt_disp.copy()
+                pt_share["사용률"] = pt_disp["MM합계"].apply(lambda x: (x/total) if total else 0.0)
+                fig = px.bar(pt_share, x="파트", y="사용률", title="파트별 GDC 사용률(전체 대비 %)")
                 fig.update_yaxes(tickformat=".0%")
                 st.plotly_chart(fig, use_container_width=True)
 
@@ -394,7 +402,8 @@ def main():
                 st.dataframe(ai_df, use_container_width=True, hide_index=True)
 
                 ai_rate = mem.groupby("part_name")["ai_used"].mean().reset_index(name="ai_rate")
-                fig = px.bar(ai_rate, x="part_name", y="ai_rate", title="파트별 AI 사용률(연누적)")
+                ai_rate_disp = ai_rate.rename(columns={"part_name":"파트","ai_rate":"사용률"})
+                fig = px.bar(ai_rate_disp, x="파트", y="사용률", title="파트별 AI 사용률(연누적)")
                 fig.update_yaxes(tickformat=".0%")
                 st.plotly_chart(fig, use_container_width=True)
 
@@ -405,10 +414,12 @@ def main():
                 st.dataframe(prep_df, use_container_width=True, hide_index=True)
 
                 prep_part = mem.groupby("part_name")["prep_lack_count"].sum().reset_index(name="prep_sum")
-                st.plotly_chart(px.bar(prep_part, x="part_name", y="prep_sum", title="파트별 준비미흡 총합(연누적)"), use_container_width=True)
+                prep_part_disp = prep_part.rename(columns={"part_name":"파트","prep_sum":"미흡합계"})
+                st.plotly_chart(px.bar(prep_part_disp, x="파트", y="미흡합계", title="파트별 준비미흡 총합(연누적)"), use_container_width=True)
 
                 topn = mem.groupby("name")["prep_lack_count"].sum().reset_index(name="prep_sum").sort_values("prep_sum", ascending=False).head(10)
-                st.plotly_chart(px.bar(topn, x="name", y="prep_sum", title="준비미흡 TOP 10(연누적)"), use_container_width=True)
+                topn_disp = topn.rename(columns={"name":"이름","prep_sum":"미흡합계"})
+                st.plotly_chart(px.bar(topn_disp, x="이름", y="미흡합계", title="준비미흡 TOP 10(연누적)"), use_container_width=True)
 
     with tab3:
         if not is_admin():
