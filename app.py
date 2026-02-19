@@ -302,11 +302,16 @@ def admin_tab():
         gdc_pivot = gdc_edit.pivot_table(index="part_name", columns="month", values="mm", aggfunc="first", fill_value=0)
         all_months = list(range(1, 13))
         gdc_pivot = gdc_pivot.reindex(all_months, axis=1, fill_value=0)
-        gdc_pivot.columns = [f"M{int(c)}" for c in gdc_pivot.columns]
+        # 한글 컬럼명으로 변경(예: '1월', '2월', ...)
+        month_cols = [f"{int(c)}월" for c in gdc_pivot.columns]
+        gdc_pivot.columns = month_cols
         
-        # 편집 가능한 데이터 프레임
+        # 편집 가능한 데이터 프레임: 'part_name' -> '파트'
+        df_edit = gdc_pivot.reset_index().rename(columns={"part_name": "파트"})
+        df_edit = df_edit.rename(columns={c: c for c in df_edit.columns})
+
         edited_gdc = st.data_editor(
-            gdc_pivot.reset_index(),
+            df_edit,
             use_container_width=True,
             hide_index=True,
             key="gdc_editor"
@@ -315,18 +320,23 @@ def admin_tab():
         # 저장 버튼
         if st.button("GDC 표 저장", key="save_gdc_table"):
             with engine.begin() as con:
-                # 기존 데이터 삭제
+                # 기존 데이터 삭제 (선택된 활성 파트만)
                 con.execute(text("DELETE FROM part_gdc_monthly WHERE year=:y AND part_id IN (SELECT part_id FROM part WHERE part_name IN :parts)"),
                            {"y": int(y_edit), "parts": tuple(parts_active)})
                 
-                # 새로운 데이터 삽입
+                # 새로운 데이터 삽입 (한글 컬럼명을 월 숫자로 역매핑)
                 for _, row in edited_gdc.iterrows():
-                    part_name = row['part_name']
-                    for month in range(1, 13):
-                        col_name = f"M{month}"
-                        mm_value = float(row[col_name]) if pd.notna(row[col_name]) else 0.0
-                        
-                        if mm_value > 0:  # 0이 아닌 값만 저장
+                    part_name = row['파트']
+                    for col in edited_gdc.columns:
+                        if col == '파트':
+                            continue
+                        # 컬럼명이 'N월' 형태인 경우 월 숫자 추출
+                        try:
+                            month = int(str(col).replace('월',''))
+                        except Exception:
+                            continue
+                        mm_value = float(row[col]) if pd.notna(row[col]) else 0.0
+                        if mm_value > 0:
                             con.execute(text("""
                             INSERT INTO part_gdc_monthly(year,month,part_id,mm,comment,updated_by)
                             SELECT :y,:m,part_id,:mm,'관리자 표 수정','admin'
