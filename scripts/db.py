@@ -5,7 +5,6 @@ from sqlalchemy import create_engine
 # 로컬 개발에서는 .env 사용 가능
 load_dotenv()
 
-
 def _as_dict(obj):
     """Streamlit Secrets의 중첩 객체가 dict가 아닐 때 최대한 dict로 변환."""
     if obj is None:
@@ -97,8 +96,6 @@ def get_engine():
 
         if cfg is None:
             # 이때는 진짜로 못 읽는 상황 → 디버그 더 출력
-            st.write("DEBUG st.secrets keys:", list(_as_dict(st.secrets).keys()) if _as_dict(st.secrets) else "(none)")
-            st.write("DEBUG connections raw:", st.secrets.get("connections", None))
             raise RuntimeError("Streamlit Secrets에서 MySQL 설정을 찾지 못했습니다. ...")
 
         host = cfg.get("host")
@@ -111,9 +108,6 @@ def get_engine():
             raise RuntimeError("Secrets에 host/username/password 값이 비어있습니다.")
 
         ca_path = _ca_path_from_cfg(cfg)
-
-        st.write(f"DEBUG DB target: {host}:{port}/{name} (user={user})")
-        st.write("DEBUG TLS CA:", ca_path if ca_path else "(none)")
 
         # PyMySQL + TLS 방식 (TiDB Cloud 안정 버전)
         url = f"mysql+pymysql://{user}:{pwd}@{host}:{port}/{name}?charset=utf8mb4"
