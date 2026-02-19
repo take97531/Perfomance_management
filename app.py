@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from scripts.db import get_engine
 import streamlit as st
 
+st.write("DEBUG APP PATH:", __file__)
 st.write("DEBUG secrets keys:", list(st.secrets.keys()))
 st.write("DEBUG connections in secrets:", "connections" in st.secrets)
 st.write("DEBUG mysql in secrets:", "mysql" in st.secrets.get("connections", {}))

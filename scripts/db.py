@@ -96,16 +96,21 @@ def get_engine():
     if in_streamlit:
         import streamlit as st  # type: ignore
 
-        cfg = _read_mysql_cfg_from_secrets()
+        import time
+
+        # (중요) Streamlit Cloud에서 가끔 초기화 타이밍에 secrets가 늦게 잡힘 → 재시도
+        cfg = None
+        for i in range(5):  # 최대 5번
+            cfg = _read_mysql_cfg_from_secrets()
+            if cfg is not None:
+                break
+            time.sleep(0.8)
+
         if cfg is None:
-            raise RuntimeError(
-                "Streamlit Secrets에서 MySQL 설정을 찾지 못했습니다.\n"
-                "- Secrets에 [connections.mysql] 섹션이 실제로 저장됐는지 확인하세요.\n"
-                "- 확인용: 앱 화면에 DEBUG connections keys가 출력됩니다.\n"
-                "예시:\n"
-                "[connections.mysql]\n"
-                "host=\"...\"\nport=4000\ndatabase=\"perfdb\"\nusername=\"...\"\npassword=\"...\"\n"
-            )
+            # 이때는 진짜로 못 읽는 상황 → 디버그 더 출력
+            st.write("DEBUG st.secrets keys:", list(_as_dict(st.secrets).keys()) if _as_dict(st.secrets) else "(none)")
+            st.write("DEBUG connections raw:", st.secrets.get("connections", None))
+            raise RuntimeError("Streamlit Secrets에서 MySQL 설정을 찾지 못했습니다. ...")
 
         host = cfg.get("host")
         port = int(cfg.get("port", 4000))
