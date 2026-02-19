@@ -8,18 +8,6 @@ from dotenv import load_dotenv
 
 from scripts.db import get_engine
 
-# -----------------------------
-# DEBUG (문제 해결 후 제거 가능)
-# -----------------------------
-st.write("DEBUG APP PATH:", __file__)
-try:
-    st.write("DEBUG secrets keys:", list(dict(st.secrets).keys()) if st.secrets else [])
-except Exception as e:
-    st.write("DEBUG secrets keys: (error)", str(e))
-
-st.write("DEBUG connections in secrets:", "connections" in st.secrets)
-st.write("DEBUG mysql in secrets:", "mysql" in st.secrets.get("connections", {}))
-
 # Secrets 미로딩 상태면 DB 쿼리에서 계속 죽기 때문에, 안내 후 중단
 if "connections" not in st.secrets or "mysql" not in st.secrets.get("connections", {}):
     st.error(
@@ -34,7 +22,7 @@ if "connections" not in st.secrets or "mysql" not in st.secrets.get("connections
 # 로컬 개발에서는 .env 사용 가능
 load_dotenv()
 
-st.set_page_config(page_title="팀 성과관리 대시보드 v3", layout="wide")
+st.set_page_config(page_title="팀 성과관리 대시보드", layout="wide")
 
 TARGET_YEAR = int(os.getenv("TARGET_YEAR", "2026"))
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
