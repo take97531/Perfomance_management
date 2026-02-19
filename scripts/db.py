@@ -126,12 +126,16 @@ def get_engine():
         st.write(f"DEBUG DB target: {host}:{port}/{name} (user={user})")
         st.write("DEBUG TLS CA:", ca_path if ca_path else "(none)")
 
-        url = f"mysql+mysqlconnector://{user}:{pwd}@{host}:{port}/{name}"
-        connect_args = {
-            "ssl_ca": ca_path,
-            "ssl_verify_cert": True,
-            "ssl_verify_identity": True,
-        } if ca_path else {}
+        # PyMySQL + TLS 방식 (TiDB Cloud 안정 버전)
+        url = f"mysql+pymysql://{user}:{pwd}@{host}:{port}/{name}?charset=utf8mb4"
+
+        connect_args = {}
+        if ca_path:
+            connect_args = {
+                "ssl": {
+                    "ca": ca_path
+                }
+            }
 
         return create_engine(url, pool_pre_ping=True, connect_args=connect_args)
 

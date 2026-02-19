@@ -1,8 +1,7 @@
 streamlit
 pandas
+plotly
 sqlalchemy
 pymysql
-mysql-connector-python
 python-dotenv
 certifi
-plotly
