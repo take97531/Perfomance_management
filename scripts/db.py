@@ -6,15 +6,19 @@ from sqlalchemy import create_engine
 load_dotenv()
 
 def _read_mysql_secrets():
-    """Streamlit Community Cloud에서는 Secrets(TOML)를 통해 DB 설정을 주입합니다."""
     import streamlit as st  # type: ignore
 
-    # 1) 권장 형태: [connections.mysql]
     conn = st.secrets.get("connections", {})
+
+    # 1) [connections.mysql]
     if isinstance(conn, dict) and "mysql" in conn:
         return conn["mysql"]
 
-    # 2) 혹시 [mysql]로 넣은 경우도 지원
+    # 2) [connections] 안에 바로 host/username/password가 들어있는 케이스
+    if isinstance(conn, dict) and all(k in conn for k in ("host", "username", "password")):
+        return conn
+
+    # 3) [mysql]
     if "mysql" in st.secrets:
         return st.secrets["mysql"]
 
