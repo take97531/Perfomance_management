@@ -5,6 +5,10 @@ import plotly.express as px
 from sqlalchemy import text
 from dotenv import load_dotenv
 from scripts.db import get_engine
+import streamlit as st
+
+st.write("DEBUG connections in secrets:", "connections" in st.secrets)
+st.write("DEBUG mysql in secrets:", "mysql" in st.secrets.get("connections", {}))
 
 load_dotenv()
 st.set_page_config(page_title="팀 성과관리 대시보드 v3", layout="wide")
