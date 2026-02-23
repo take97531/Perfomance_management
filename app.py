@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from scripts.db import get_engine
 
 load_dotenv()
-st.set_page_config(page_title="팀 성과관리 대시보드 v3", layout="wide")
+st.set_page_config(page_title="팀 성과관리 대시보드", layout="wide")
 
 TARGET_YEAR = int(os.getenv("TARGET_YEAR", "2026"))
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
