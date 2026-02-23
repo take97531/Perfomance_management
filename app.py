@@ -5,11 +5,9 @@ import plotly.express as px
 from sqlalchemy import text
 from dotenv import load_dotenv
 from scripts.db import get_engine
-import streamlit as st
 
-st.cache_data.clear()
 load_dotenv()
-st.set_page_config(page_title="팀 성과관리 대시보드", layout="wide")
+st.set_page_config(page_title="팀 성과관리 대시보드 v3", layout="wide")
 
 TARGET_YEAR = int(os.getenv("TARGET_YEAR", "2026"))
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
@@ -97,11 +95,16 @@ def query_finance_details(year:int, part_name:str, kpi_type:str):
 
 def query_gdc_monthly(year:int, part_names:list[str]):
     engine = get_engine()
+    # 모든 파트와 1-12월을 결합하여 누락된 월도 0으로 표시
     q = """
-    SELECT p.part_name, g.month, g.mm
-    FROM part_gdc_monthly g
-    JOIN part p ON p.part_id=g.part_id
-    WHERE g.year=:year AND p.part_name IN :parts
+    SELECT p.part_name, m.month, COALESCE(g.mm, 0) AS mm
+    FROM part p
+    CROSS JOIN (SELECT 1 AS month UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 
+                UNION SELECT 5 UNION SELECT 6 UNION SELECT 7 UNION SELECT 8 
+                UNION SELECT 9 UNION SELECT 10 UNION SELECT 11 UNION SELECT 12) m
+    LEFT JOIN part_gdc_monthly g ON g.part_id=p.part_id AND g.year=:year AND g.month=m.month
+    WHERE p.part_name IN :parts
+    ORDER BY p.part_name, m.month
     """
     return pd.read_sql(text(q), engine, params={"year":year, "parts":tuple(part_names)})
 
@@ -154,7 +157,7 @@ def admin_tab():
                     st.success("추가 완료")
                     st.rerun()
     with c2:
-        st.dataframe(parts, use_container_width=True, hide_index=True)
+        st.dataframe(parts.rename(columns={"part_id":"파트ID","part_name":"파트명","active":"활성"}), use_container_width=True, hide_index=True)
 
     st.markdown("파트 수정/비활성화")
     with st.form("update_part"):
@@ -194,7 +197,7 @@ def admin_tab():
                     st.success("추가 완료")
                     st.rerun()
     with cB:
-        st.dataframe(members, use_container_width=True, hide_index=True)
+        st.dataframe(members.rename(columns={"member_id":"멤버ID","name":"이름","active":"활성","part_id":"파트ID","part_name":"파트명"}), use_container_width=True, hide_index=True)
 
     st.markdown("인원 수정/비활성화")
     with st.form("update_member"):
@@ -277,6 +280,77 @@ def admin_tab():
                 st.success("저장 완료")
                 st.rerun()
 
+    st.markdown("#### GDC 표 편집(파트 × 월)")
+    y_edit = st.number_input("연도(표 편집)", min_value=2000, max_value=2100, value=TARGET_YEAR, key="gdc_edit_y")
+    parts_active = load_parts().query("active==1")["part_name"].tolist()
+    
+    if parts_active:
+        # 모든 월(1-12)을 포함한 GDC 데이터 조회
+        q_edit = """
+        SELECT p.part_id, p.part_name, m.month, COALESCE(g.mm, 0) AS mm, COALESCE(g.comment, '') AS comment
+        FROM part p
+        CROSS JOIN (SELECT 1 AS month UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 
+                    UNION SELECT 5 UNION SELECT 6 UNION SELECT 7 UNION SELECT 8 
+                    UNION SELECT 9 UNION SELECT 10 UNION SELECT 11 UNION SELECT 12) m
+        LEFT JOIN part_gdc_monthly g ON g.part_id=p.part_id AND g.year=:year AND g.month=m.month
+        WHERE p.part_name IN :parts AND p.active=TRUE
+        ORDER BY p.part_name, m.month
+        """
+        gdc_edit = pd.read_sql(text(q_edit), engine, params={"year": int(y_edit), "parts": tuple(parts_active)})
+        
+        # 피벗 테이블 생성 (파트별 행, 월별 열)
+        gdc_pivot = gdc_edit.pivot_table(index="part_name", columns="month", values="mm", aggfunc="first", fill_value=0)
+        all_months = list(range(1, 13))
+        gdc_pivot = gdc_pivot.reindex(all_months, axis=1, fill_value=0)
+        # 한글 컬럼명으로 변경(예: '1월', '2월', ...)
+        month_cols = [f"{int(c)}월" for c in gdc_pivot.columns]
+        gdc_pivot.columns = month_cols
+        
+        # 편집 가능한 데이터 프레임: 'part_name' -> '파트'
+        df_edit = gdc_pivot.reset_index().rename(columns={"part_name": "파트"})
+        df_edit = df_edit.rename(columns={c: c for c in df_edit.columns})
+
+        edited_gdc = st.data_editor(
+            df_edit,
+            use_container_width=True,
+            hide_index=True,
+            key="gdc_editor"
+        )
+        
+        # 저장 버튼
+        if st.button("GDC 표 저장", key="save_gdc_table"):
+            with engine.begin() as con:
+                # 기존 데이터 삭제 (선택된 활성 파트만)
+                con.execute(text("DELETE FROM part_gdc_monthly WHERE year=:y AND part_id IN (SELECT part_id FROM part WHERE part_name IN :parts)"),
+                           {"y": int(y_edit), "parts": tuple(parts_active)})
+                
+                # 새로운 데이터 삽입 (한글 컬럼명을 월 숫자로 역매핑)
+                for _, row in edited_gdc.iterrows():
+                    part_name = row['파트']
+                    for col in edited_gdc.columns:
+                        if col == '파트':
+                            continue
+                        # 컬럼명이 'N월' 형태인 경우 월 숫자 추출
+                        try:
+                            month = int(str(col).replace('월',''))
+                        except Exception:
+                            continue
+                        mm_value = float(row[col]) if pd.notna(row[col]) else 0.0
+                        if mm_value > 0:
+                            con.execute(text("""
+                            INSERT INTO part_gdc_monthly(year,month,part_id,mm,comment,updated_by)
+                            SELECT :y,:m,part_id,:mm,'관리자 표 수정','admin'
+                            FROM part WHERE part_name=:pn
+                            ON DUPLICATE KEY UPDATE
+                              mm=VALUES(mm),
+                              comment=VALUES(comment),
+                              updated_by=VALUES(updated_by)
+                            """), {"y": int(y_edit), "m": month, "pn": part_name, "mm": mm_value})
+            
+            st.cache_data.clear()
+            st.success("GDC 데이터가 저장되었습니다!")
+            st.rerun()
+
     st.markdown("#### 개인 성과 입력(월)")
     mem = load_members().query("active==1")
     if mem.empty:
@@ -311,7 +385,7 @@ def main():
     admin_login_ui()
     parts_selected = part_filter_ui()
 
-    st.title("팀 성과관리 대시보드")
+    st.title("팀 성과관리 대시보드 v3")
     st.caption(f"{TARGET_YEAR}년 누적 기준 (주차 필터 없음)")
 
     if not parts_selected:
@@ -331,6 +405,7 @@ def main():
         st.subheader("파트 성과")
 
         c1,c2 = st.columns(2)
+        # 표시용으로 컬럼 이름을 한글로 변환한 복사본 생성
         fin_total_disp = fin_total.rename(columns={"part_name":"파트","revenue_sum":"매출","op_profit_sum":"영업이익"})
         with c1:
             st.plotly_chart(px.bar(fin_total_disp, x="파트", y="매출", title="파트별 매출(누적)"), use_container_width=True)
@@ -348,8 +423,7 @@ def main():
         st.markdown("#### 월별 추이(선택 파트 합산)")
         if not fin_monthly.empty:
             agg = fin_monthly.groupby("month").agg(매출=("revenue_sum","sum"), 영업이익=("op_profit_sum","sum")).reset_index()
-            agg_disp = agg.rename(columns={"month":"월"})
-            st.plotly_chart(px.line(agg_disp, x="월", y=["매출","영업이익"], title="월별 매출/영업이익 추이"), use_container_width=True)
+            st.plotly_chart(px.line(agg, x="month", y=["매출","영업이익"], title="월별 매출/영업이익 추이"), use_container_width=True)
         else:
             st.info("매출/영업이익 데이터가 없습니다.")
 
@@ -358,6 +432,7 @@ def main():
             st.info("GDC 데이터가 없습니다.")
         else:
             piv = gdc.pivot_table(index="part_name", columns="month", values="mm", aggfunc="sum", fill_value=0)
+            # 1월부터 12월까지 모두 포함하도록 정렬
             all_months = list(range(1, 13))
             piv = piv.reindex(all_months, axis=1, fill_value=0)
             piv.columns = [f"{int(c)}월" for c in piv.columns]
@@ -368,13 +443,12 @@ def main():
             total = float(pt["mm_sum"].sum()) if not pt.empty else 0.0
             pt["mm_share"] = pt["mm_sum"].apply(lambda x: (x/total) if total else 0.0)
             c1,c2 = st.columns(2)
-            pt_disp = pt.rename(columns={"part_name":"파트","mm_sum":"MM합계"})
+            pt_disp = pt.rename(columns={"part_name":"파트","mm_sum":"MM_합계"})
+            pt_disp["비중"] = pt_disp["MM_합계"].apply(lambda x: (x/total) if total else 0.0)
             with c1:
-                st.plotly_chart(px.bar(pt_disp, x="파트", y="MM합계", title="파트별 GDC 총 MM(연누적)"), use_container_width=True)
+                st.plotly_chart(px.bar(pt_disp, x="파트", y="MM_합계", title="파트별 GDC 총 MM(연누적)"), use_container_width=True)
             with c2:
-                pt_share = pt_disp.copy()
-                pt_share["사용률"] = pt_disp["MM합계"].apply(lambda x: (x/total) if total else 0.0)
-                fig = px.bar(pt_share, x="파트", y="사용률", title="파트별 GDC 사용률(전체 대비 %)")
+                fig = px.bar(pt_disp, x="파트", y="비중", title="파트별 GDC 사용률(전체 대비 %)")
                 fig.update_yaxes(tickformat=".0%")
                 st.plotly_chart(fig, use_container_width=True)
 
@@ -403,8 +477,8 @@ def main():
                 st.dataframe(ai_df, use_container_width=True, hide_index=True)
 
                 ai_rate = mem.groupby("part_name")["ai_used"].mean().reset_index(name="ai_rate")
-                ai_rate_disp = ai_rate.rename(columns={"part_name":"파트","ai_rate":"사용률"})
-                fig = px.bar(ai_rate_disp, x="파트", y="사용률", title="파트별 AI 사용률(연누적)")
+                ai_rate_disp = ai_rate.rename(columns={"part_name":"파트","ai_rate":"AI_사용률"})
+                fig = px.bar(ai_rate_disp, x="파트", y="AI_사용률", title="파트별 AI 사용률(연누적)")
                 fig.update_yaxes(tickformat=".0%")
                 st.plotly_chart(fig, use_container_width=True)
 
@@ -415,12 +489,12 @@ def main():
                 st.dataframe(prep_df, use_container_width=True, hide_index=True)
 
                 prep_part = mem.groupby("part_name")["prep_lack_count"].sum().reset_index(name="prep_sum")
-                prep_part_disp = prep_part.rename(columns={"part_name":"파트","prep_sum":"미흡합계"})
-                st.plotly_chart(px.bar(prep_part_disp, x="파트", y="미흡합계", title="파트별 준비미흡 총합(연누적)"), use_container_width=True)
+                prep_part_disp = prep_part.rename(columns={"part_name":"파트","prep_sum":"준비미흡_합계"})
+                st.plotly_chart(px.bar(prep_part_disp, x="파트", y="준비미흡_합계", title="파트별 준비미흡 총합(연누적)"), use_container_width=True)
 
                 topn = mem.groupby("name")["prep_lack_count"].sum().reset_index(name="prep_sum").sort_values("prep_sum", ascending=False).head(10)
-                topn_disp = topn.rename(columns={"name":"이름","prep_sum":"미흡합계"})
-                st.plotly_chart(px.bar(topn_disp, x="이름", y="미흡합계", title="준비미흡 TOP 10(연누적)"), use_container_width=True)
+                topn_disp = topn.rename(columns={"name":"이름","prep_sum":"준비미흡_합계"})
+                st.plotly_chart(px.bar(topn_disp, x="이름", y="준비미흡_합계", title="준비미흡 TOP 10(연누적)"), use_container_width=True)
 
     with tab3:
         if not is_admin():
